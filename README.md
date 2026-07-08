@@ -61,6 +61,8 @@ observations**:
 | Max stations       | 3       | Nearest qualifying stations                       |
 | Extra station IDs  | —       | Always followed, regardless of distance           |
 | Fallback position  | —       | Used when there is no GPS position — handy at the dock or for testing |
+| Meteo targets      | on      | Publish stations as `meteo.*` contexts for chartplotters (see below) |
+| Alarm chart notes  | on      | Place a note at the station when an alarm is active (see below) |
 | Wind rise alarm    | 5 m/s / 30 min  |                                           |
 | Wind shift alarm   | 45° / 30 min    |                                           |
 | Pressure drop alarm| 2 hPa / 120 min | ≥ 1 hPa/h sustained usually means real weather coming — tune to taste |
@@ -83,6 +85,22 @@ Single station (this is what the plugin polls):
 ```
 https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivastation/33
 ```
+
+## Freeboard-SK: stations and alarms on the chart
+
+Two optional features (both on by default) put the stations on the chart:
+
+- **Weather station targets** — each station is also published as a Signal K
+  `meteo.*` context with its position, name and observations. Freeboard-SK
+  shows these as weather stations on the map: enable **Meteo (Weather)** under
+  Settings → Display in Freeboard-SK, then tap a station to see its current
+  wind, pressure and temperature.
+- **Alarm notes** — when an alarm fires (wind rise, wind shift, pressure
+  drop), the plugin places a chart note ("⚠ Vinga") at the station position
+  with the alarm text, and removes it when the alarm clears. Requires a
+  resources provider on the server (the bundled `resources-provider` plugin —
+  enabled by default on recent servers). Tap the marker in Freeboard-SK to
+  read what happened.
 
 ## Visualization
 

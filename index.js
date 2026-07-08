@@ -20,6 +20,20 @@ const SAMPLE_KINDS = [
 
 const DIRECTION_SUFFIX = 'wind.directionTrue'
 
+// Vessel-context path suffixes -> paths used under the meteo.* context,
+// which chartplotters like Freeboard-SK display as weather stations on the map
+const METEO_PATHS = {
+  'wind.averageSpeed': 'environment.wind.averageSpeed',
+  'wind.gust': 'environment.wind.gust',
+  'wind.directionTrue': 'environment.wind.directionTrue',
+  pressure: 'environment.outside.pressure',
+  temperature: 'environment.outside.temperature',
+  'water.temperature': 'environment.water.temperature',
+  'water.level': 'environment.water.level'
+}
+
+const ALARM_KEYS = ['windRise', 'windShift', 'pressureDrop']
+
 module.exports = function (app) {
   const plugin = {}
   let timer = null
@@ -68,6 +82,18 @@ module.exports = function (app) {
           latitude: { type: 'number', title: 'Latitude' },
           longitude: { type: 'number', title: 'Longitude' }
         }
+      },
+      publishMeteo: {
+        type: 'boolean',
+        title: 'Publish stations as weather station (meteo) targets',
+        description: 'Shows the stations on the chart in Freeboard-SK (enable "Meteo (Weather)" under Settings → Display in Freeboard-SK).',
+        default: true
+      },
+      alarmNotes: {
+        type: 'boolean',
+        title: 'Place a chart note at stations with an active alarm',
+        description: 'Shows a marker with the alarm text at the station position in Freeboard-SK. Requires a resources provider (the bundled resources-provider plugin).',
+        default: true
       },
       alarms: {
         type: 'object',
@@ -121,6 +147,8 @@ module.exports = function (app) {
         typeof options.fallbackPosition.longitude === 'number'
           ? options.fallbackPosition
           : null,
+      publishMeteo: options.publishMeteo !== false,
+      alarmNotes: options.alarmNotes !== false,
       alarms: Object.assign(
         {
           enabled: true,
@@ -212,7 +240,10 @@ module.exports = function (app) {
     for (const [id, st] of selected) {
       const existing = state.stations.get(id)
       if (existing) selected.set(id, existing)
-      else app.debug(`Following ViVa station ${st.name} (${id})`)
+      else {
+        app.debug(`Following ViVa station ${st.name} (${id})`)
+        clearAlarmNotes(st)
+      }
     }
     state.stations = selected
     state.lastDiscovery = Date.now()
@@ -233,6 +264,7 @@ module.exports = function (app) {
       id: raw.ID,
       name: raw.Name,
       slug: slugify(raw.Name),
+      uuid: stationUuid(raw.ID),
       position: { latitude: raw.Lat, longitude: raw.Lon },
       distance: vesselPos ? haversine(vesselPos, { latitude: raw.Lat, longitude: raw.Lon }) : null,
       history: { windSpeed: [], windDir: [], pressure: [] },
@@ -266,12 +298,14 @@ module.exports = function (app) {
     const prefix = `environment.observations.viva.${st.slug}.`
     const now = Date.now()
     const values = []
+    const pairs = []
     const seen = new Set()
 
     const push = (suffix, value) => {
       if (suffix && value != null && !seen.has(suffix)) {
         seen.add(suffix)
         values.push({ path: prefix + suffix, value })
+        pairs.push({ suffix, value })
       }
     }
 
@@ -300,7 +334,25 @@ module.exports = function (app) {
     app.handleMessage(plugin.id, {
       updates: [{ timestamp: new Date().toISOString(), values }]
     })
+    if (cfg.publishMeteo) sendMeteo(st, pairs)
     evaluateAlarms(st)
+  }
+
+  // Publish the station as its own meteo.* context so chartplotters
+  // (e.g. Freeboard-SK with the Meteo layer enabled) show it on the map
+  function sendMeteo (st, pairs) {
+    const values = [
+      { path: '', value: { name: st.name } },
+      { path: 'navigation.position', value: st.position }
+    ]
+    for (const { suffix, value } of pairs) {
+      const meteoPath = METEO_PATHS[suffix]
+      if (meteoPath) values.push({ path: meteoPath, value })
+    }
+    app.handleMessage(plugin.id, {
+      context: `meteo.urn:mrn:signalk:uuid:${st.uuid}`,
+      updates: [{ timestamp: new Date().toISOString(), values }]
+    })
   }
 
   function parseSampleValue (sample) {
@@ -394,6 +446,35 @@ module.exports = function (app) {
         }
       ]
     })
+    updateAlarmNote(st, key, active, message)
+  }
+
+  // A note at the station position makes the alarm visible on the chart
+  // (Freeboard-SK renders notes as markers with the text in the popup)
+  function updateAlarmNote (st, key, active, message) {
+    if (!cfg.alarmNotes || !app.resourcesApi) return
+    const id = alarmNoteId(st, key)
+    const op = active
+      ? app.resourcesApi.setResource('notes', id, {
+          name: `⚠ ${st.name}`,
+          description: message,
+          position: { latitude: st.position.latitude, longitude: st.position.longitude },
+          group: 'signalk-viva'
+        })
+      : app.resourcesApi.deleteResource('notes', id)
+    Promise.resolve(op).catch(err =>
+      app.debug(`Could not update alarm note for ${st.name}: ${err.message}`)
+    )
+  }
+
+  // Remove notes that may be left over from before a restart
+  function clearAlarmNotes (st) {
+    if (!cfg.alarmNotes || !app.resourcesApi) return
+    for (const key of ALARM_KEYS) {
+      Promise.resolve(app.resourcesApi.deleteResource('notes', alarmNoteId(st, key))).catch(
+        () => {}
+      )
+    }
   }
 
   function recordHistory (entries, time, value) {
@@ -480,6 +561,17 @@ module.exports = function (app) {
       Math.sin(dLat / 2) ** 2 +
       Math.cos(degToRad(a.latitude)) * Math.cos(degToRad(b.latitude)) * Math.sin(dLon / 2) ** 2
     return 2 * R * Math.asin(Math.sqrt(h))
+  }
+
+  // Stable, valid-format UUIDs derived from the station ID, so the same
+  // station keeps the same meteo context and note IDs across restarts
+  function stationUuid (id) {
+    return '00000000-0000-4000-8000-' + String(id).padStart(12, '0')
+  }
+
+  function alarmNoteId (st, key) {
+    const idx = ALARM_KEYS.indexOf(key) + 1
+    return '00000000-0000-4000-9000-' + String(st.id).padStart(11, '0') + String(idx)
   }
 
   // "Bönan (SMHI)" -> "bonan"
