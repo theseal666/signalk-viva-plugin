@@ -37,6 +37,10 @@ For each station, under `environment.observations.viva.<station>.`:
 
 Example: `environment.observations.viva.bonan.wind.averageSpeed`
 
+Live data in the Signal K Data Browser (here from Vinga and Svenska Högarna):
+
+![ViVa observations in the Signal K Data Browser](screenshot-data-browser.png)
+
 Alarms are published as standard Signal K notifications, e.g.
 `notifications.environment.observations.viva.bonan.pressureDrop` with
 `state: "alert"` and `method: ["visual", "sound"]`, and cleared with
@@ -61,6 +65,8 @@ observations**:
 
 Alarm windows need at least half the window of collected history before they
 can fire, so you won't get spurious alarms right after startup.
+
+![Plugin configuration in the Signal K admin UI](screenshot-plugin-config.png)
 
 ### Finding station IDs
 
