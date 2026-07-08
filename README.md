@@ -4,7 +4,7 @@
 [logo]: https://raw.githubusercontent.com/theseal666/signalk-viva-plugin/main/signalK-viva-plugin_logo.png "signalk-viva"
 
 
-a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a configurable number of stations around my location to monitor for wind, barometric pressure and visualize and with end goal - put alarms in place for sudden changes in conditions.
+a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a configurable number of stations around my location to monitor for wind, barometric pressure and with alarms through signalK notifications for sudden changes in conditions in stations close to you.
 
 ## What it does
 
