@@ -34,6 +34,7 @@ For each station, under `environment.observations.viva.<station>.`:
 | `temperature`        | Lufttemp      | K     |
 | `water.temperature`  | Vattentemp    | K     |
 | `water.level`        | Vattenstånd   | m     |
+| `distance`           | — (great-circle distance from vessel to station, recalculated every poll) | m |
 
 Example: `environment.observations.viva.bonan.wind.averageSpeed`
 
@@ -59,6 +60,7 @@ observations**:
 | Search radius      | 50 km   | Around current vessel position                    |
 | Max stations       | 3       | Nearest qualifying stations                       |
 | Extra station IDs  | —       | Always followed, regardless of distance           |
+| Fallback position  | —       | Used when there is no GPS position — handy at the dock or for testing |
 | Wind rise alarm    | 5 m/s / 30 min  |                                           |
 | Wind shift alarm   | 45° / 30 min    |                                           |
 | Pressure drop alarm| 2 hPa / 120 min | ≥ 1 hPa/h sustained usually means real weather coming — tune to taste |
@@ -92,7 +94,14 @@ https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivast
 
 ## Install
 
-Not yet on npm. Install from source:
+Install **signalk-viva** from the Signal K App Store (admin UI → Appstore),
+or from npm:
+
+```
+npm install signalk-viva
+```
+
+or from source:
 
 ```
 cd ~/.signalk/node_modules

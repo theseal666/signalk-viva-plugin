@@ -60,6 +60,15 @@ module.exports = function (app) {
         description: 'ViVa station IDs, e.g. 33 for Bönan. Followed regardless of distance.',
         items: { type: 'integer' }
       },
+      fallbackPosition: {
+        type: 'object',
+        title: 'Fallback position (used when the vessel has no GPS position)',
+        description: 'Decimal degrees, e.g. 57.63 / 11.60 for Vinga. Leave empty to rely on navigation.position only.',
+        properties: {
+          latitude: { type: 'number', title: 'Latitude' },
+          longitude: { type: 'number', title: 'Longitude' }
+        }
+      },
       alarms: {
         type: 'object',
         title: 'Alarms',
@@ -106,6 +115,12 @@ module.exports = function (app) {
       maxDistance: (options.maxDistance || 50) * 1000,
       maxStations: options.maxStations || 3,
       manualStations: options.manualStations || [],
+      fallbackPosition:
+        options.fallbackPosition &&
+        typeof options.fallbackPosition.latitude === 'number' &&
+        typeof options.fallbackPosition.longitude === 'number'
+          ? options.fallbackPosition
+          : null,
       alarms: Object.assign(
         {
           enabled: true,
@@ -274,6 +289,9 @@ module.exports = function (app) {
       if (kind.history === 'pressure' && si != null) recordHistory(st.history.pressure, now, si)
     }
 
+    const pos = getVesselPosition()
+    if (pos) push('distance', Math.round(haversine(pos, st.position)))
+
     if (values.length === 0) return
     if (!st.metaSent) {
       sendMeta(st, prefix)
@@ -304,6 +322,10 @@ module.exports = function (app) {
     meta.push({
       path: prefix + DIRECTION_SUFFIX,
       value: { units: 'rad', description: `${st.name} (ViVa station ${st.id})` }
+    })
+    meta.push({
+      path: prefix + 'distance',
+      value: { units: 'm', description: `Distance from vessel to ${st.name} (ViVa station ${st.id})` }
     })
     app.handleMessage(plugin.id, { updates: [{ meta }] })
   }
@@ -420,7 +442,8 @@ module.exports = function (app) {
   function getVesselPosition () {
     const p = app.getSelfPath('navigation.position')
     const v = p && p.value ? p.value : p
-    return v && typeof v.latitude === 'number' ? v : null
+    if (v && typeof v.latitude === 'number') return v
+    return cfg.fallbackPosition
   }
 
   function toSI (value, unit) {
