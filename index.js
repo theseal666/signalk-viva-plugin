@@ -1,13 +1,50 @@
 'use strict'
 
+/*
+ * signalk-viva — Sjöfartsverket ViVa observations for Signal K
+ *
+ * How it works, in one pass through the code:
+ *
+ *  1. DISCOVERY (maybeDiscover): fetch the ViVa station list, pick the
+ *     nearest stations around the vessel position that report wind and/or
+ *     air pressure (probeStation), plus any manually configured IDs.
+ *     Re-runs when the vessel has moved >10 km or every 6 h.
+ *  2. POLLING (pollStations): every pollInterval, fetch each station's
+ *     samples and convert them to SI units (parseSampleValue/toSI).
+ *  3. PUBLISHING (handleStationData): emit the values as Signal K deltas
+ *     under environment.observations.viva.<station>.*, and optionally a
+ *     second time as a meteo.* context (sendMeteo) so chartplotters like
+ *     Freeboard-SK draw the station on the map.
+ *  4. ALARMS (evaluateAlarms/setAlarm): keep a short history of wind and
+ *     pressure per station and compare the change across a configurable
+ *     time window against thresholds. Alarms are published as Signal K
+ *     notifications, and optionally as chart notes at the station position
+ *     (updateAlarmNote).
+ *
+ * The ViVa JSON service is unofficial (it is what the ViVa app uses), so
+ * everything here is defensive: unknown sample types are ignored, fetch
+ * errors are logged and retried on the next poll.
+ */
+
+// Station list at this URL; append a station ID for that station's samples
 const BASE_URL = 'https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivastation/'
+// Give up on a ViVa request after this long
 const FETCH_TIMEOUT_MS = 10000
+// Re-run station discovery at least this often…
 const DISCOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000
+// …or as soon as the vessel has moved this far from the last discovery position
 const REDISCOVER_MOVE_M = 10000
+// How many stations to probe in parallel during discovery
 const PROBE_BATCH_SIZE = 4
 
-// How ViVa sample names map onto Signal K path suffixes.
-// `qualifies` marks the sample types that make a station worth watching from a sailboat.
+// How ViVa sample names (Swedish) map onto Signal K path suffixes.
+//   match     — regex tested against the sample's Name field
+//   path      — suffix under environment.observations.viva.<station>.
+//   units     — SI units after conversion in toSI(), sent as Signal K meta
+//   direction — sample carries wind direction in its Heading field (degrees)
+//   qualifies — sample types that make a station worth following from a
+//               sailboat; stations with none of these are skipped
+//   history   — which per-station history buffer feeds the alarm logic
 const SAMPLE_KINDS = [
   { match: /^medelvind/i, path: 'wind.averageSpeed', units: 'm/s', direction: true, qualifies: true, history: 'windSpeed' },
   { match: /^byvind/i, path: 'wind.gust', units: 'm/s', qualifies: true },
@@ -162,6 +199,15 @@ module.exports = function (app) {
         options.alarms
       )
     }
+    // Longest alarm window in ms — how much history recordHistory keeps
+    cfg.maxWindowMs =
+      Math.max(
+        cfg.alarms.windRiseWindow,
+        cfg.alarms.windShiftWindow,
+        cfg.alarms.pressureDropWindow
+      ) *
+      60 *
+      1000
     state = {
       stations: new Map(),
       lastDiscovery: 0,
@@ -182,6 +228,8 @@ module.exports = function (app) {
     app.setPluginStatus('Stopped')
   }
 
+  // One poll cycle. The busy flag prevents overlapping cycles when a slow
+  // network makes a cycle take longer than the poll interval.
   async function tick () {
     if (busy || !state) return
     busy = true
@@ -197,6 +245,9 @@ module.exports = function (app) {
 
   // ---------- discovery ----------
 
+  // Decide which stations to follow. Manual station IDs are always included;
+  // the rest are the nearest qualifying stations within the search radius,
+  // probed nearest-first so we stop fetching as soon as we have enough.
   async function maybeDiscover () {
     const pos = getVesselPosition()
     const due = Date.now() - state.lastDiscovery > DISCOVERY_INTERVAL_MS
@@ -210,7 +261,7 @@ module.exports = function (app) {
 
     for (const id of cfg.manualStations) {
       const s = byId.get(id)
-      if (s) selected.set(id, makeStation(s, pos))
+      if (s) selected.set(id, makeStation(s))
       else app.error(`ViVa station ${id} not found in station list`)
     }
 
@@ -226,7 +277,7 @@ module.exports = function (app) {
         const probed = await Promise.all(batch.map(c => probeStation(c).catch(() => null)))
         for (const c of probed) {
           if (c && autoCount < cfg.maxStations) {
-            selected.set(c.station.ID, makeStation(c.station, pos))
+            selected.set(c.station.ID, makeStation(c.station))
             autoCount++
           }
         }
@@ -259,16 +310,17 @@ module.exports = function (app) {
     return relevant ? candidate : null
   }
 
-  function makeStation (raw, vesselPos) {
+  // Per-station runtime state. The history buffers feed the alarm logic and
+  // survive re-discovery for stations that stay selected (see maybeDiscover).
+  function makeStation (raw) {
     return {
       id: raw.ID,
       name: raw.Name,
       slug: slugify(raw.Name),
       uuid: stationUuid(raw.ID),
       position: { latitude: raw.Lat, longitude: raw.Lon },
-      distance: vesselPos ? haversine(vesselPos, { latitude: raw.Lat, longitude: raw.Lon }) : null,
       history: { windSpeed: [], windDir: [], pressure: [] },
-      alarms: {},
+      alarms: {}, // active/inactive per alarm key
       metaSent: false,
       errors: 0
     }
@@ -294,13 +346,17 @@ module.exports = function (app) {
     app.setPluginStatus(`Updated ${ok}/${state.stations.size} stations: ${names}`)
   }
 
+  // Turn one station's ViVa samples into Signal K deltas, record alarm
+  // history, and kick off the alarm evaluation.
   function handleStationData (st, result) {
     const prefix = `environment.observations.viva.${st.slug}.`
     const now = Date.now()
-    const values = []
-    const pairs = []
+    const values = [] // delta values for the vessel context
+    const pairs = [] // same data as {suffix, value}, reused for the meteo context
     const seen = new Set()
 
+    // A station can report overlapping samples (e.g. both Medelvind and
+    // Vindriktning carry a wind direction) — first one wins.
     const push = (suffix, value) => {
       if (suffix && value != null && !seen.has(suffix)) {
         seen.add(suffix)
@@ -355,12 +411,17 @@ module.exports = function (app) {
     })
   }
 
+  // ViVa values are strings that may embed a compass direction ("NV 8.8")
+  // or use a decimal comma — extract the first number and convert to SI.
+  // A calm wind sample may have no number at all; treat that as 0.
   function parseSampleValue (sample) {
     const match = String(sample.Value).replace(',', '.').match(/-?\d+(\.\d+)?/)
     if (!match) return sample.Calm ? 0 : null
     return toSI(parseFloat(match[0]), sample.Unit)
   }
 
+  // Send Signal K meta (units + station name) once per station, so apps
+  // like KIP can label gauges and convert units correctly
   function sendMeta (st, prefix) {
     const meta = []
     for (const kind of SAMPLE_KINDS) {
@@ -384,6 +445,8 @@ module.exports = function (app) {
 
   // ---------- alarms ----------
 
+  // Compare how much wind and pressure changed across each alarm's time
+  // window against the configured thresholds
   function evaluateAlarms (st) {
     const a = cfg.alarms
     if (!a.enabled) return
@@ -477,14 +540,11 @@ module.exports = function (app) {
     }
   }
 
+  // Append a sample to a station's history buffer and drop entries older
+  // than the longest alarm window (plus some slack), keeping memory bounded
   function recordHistory (entries, time, value) {
-    const maxWindowMin = Math.max(
-      cfg.alarms.windRiseWindow,
-      cfg.alarms.windShiftWindow,
-      cfg.alarms.pressureDropWindow
-    )
     entries.push({ time, value })
-    const cutoff = time - maxWindowMin * 60 * 1000 * 1.25
+    const cutoff = time - cfg.maxWindowMs * 1.25
     while (entries.length && entries[0].time < cutoff) entries.shift()
   }
 
@@ -505,6 +565,8 @@ module.exports = function (app) {
     return ends ? ends[1] - ends[0] : null
   }
 
+  // Like changeOverWindow but for compass directions: the shortest way
+  // around the circle, so 350° -> 10° is a 20° shift, not 340°
   function angularChangeOverWindow (entries, windowMin) {
     const ends = windowEndpoints(entries, windowMin)
     if (!ends) return null
@@ -520,6 +582,9 @@ module.exports = function (app) {
     return res.json()
   }
 
+  // Vessel position from the Signal K full model; getSelfPath may return the
+  // bare value or a {value, meta, …} object depending on the server. Falls
+  // back to the configured position so the plugin works without a GPS.
   function getVesselPosition () {
     const p = app.getSelfPath('navigation.position')
     const v = p && p.value ? p.value : p
@@ -527,6 +592,8 @@ module.exports = function (app) {
     return cfg.fallbackPosition
   }
 
+  // Convert a ViVa value to the SI unit Signal K expects
+  // (m/s stays, cm -> m, hPa -> Pa, °C -> K, km -> m)
   function toSI (value, unit) {
     switch (String(unit || '').trim().toLowerCase()) {
       case 'm/s':
@@ -553,6 +620,7 @@ module.exports = function (app) {
     return (deg * Math.PI) / 180
   }
 
+  // Great-circle distance in metres between two {latitude, longitude} points
   function haversine (a, b) {
     const R = 6371000
     const dLat = degToRad(b.latitude - a.latitude)

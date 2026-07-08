@@ -4,7 +4,7 @@
 [logo]: https://raw.githubusercontent.com/theseal666/signalk-viva-plugin/main/signalK-viva-plugin_logo.png "signalk-viva"
 
 
-a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a configurable number of stations around my location to monitor for wind, barometric pressure, configrable alarms for sudden changes in conditions and visualisation in KIP and freeboard-SK.
+a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a configurable number of stations around my location to monitor for wind, barometric pressure, configurable alarms for sudden changes in conditions and visualisation in KIP and freeboard-SK.
 
 ## What it does
 
@@ -92,15 +92,48 @@ Two optional features (both on by default) put the stations on the chart:
 
 - **Weather station targets** — each station is also published as a Signal K
   `meteo.*` context with its position, name and observations. Freeboard-SK
-  shows these as weather stations on the map: enable **Meteo (Weather)** under
-  Settings → Display in Freeboard-SK, then tap a station to see its current
-  wind, pressure and temperature.
+  shows these as windsock icons on the map; tap one to see its current
+  wind, direction and temperature.
 - **Alarm notes** — when an alarm fires (wind rise, wind shift, pressure
   drop), the plugin places a chart note ("⚠ Vinga") at the station position
   with the alarm text, and removes it when the alarm clears. Requires a
   resources provider on the server (the bundled `resources-provider` plugin —
   enabled by default on recent servers). Tap the marker in Freeboard-SK to
   read what happened.
+
+### Freeboard-SK setup checklist
+
+The windsocks are easy to lose to a display toggle — if they don't show,
+walk through this list:
+
+1. **Settings → Signal K tab**: tick **Weather (Meteo)** under "Filter
+   Stream data".
+2. Same place: keep **Max. distance from vessel** at **None** if the vessel
+   has no GPS position — with a distance set, Freeboard cannot compute
+   distances and hides all targets.
+3. **Map display**: in the "⋯" menu on the map toolbar, make sure
+   **Show Vessels** is on — weather stations are drawn on the same layer as
+   AIS vessels and hide together with them (an eye-with-slash icon on the map
+   means display layers are hidden).
+4. Keep **Show Notes** on to see the ⚠ alarm notes.
+5. Diagnostic: the ☰ menu → **Weather** lists all weather stations Freeboard
+   receives — if your stations are in the list but not on the map, it is one
+   of the display toggles above.
+
+The windsock icon size is currently fixed in Freeboard-SK; there is an open
+feature request for scalable wind-barb symbols:
+[freeboard-sk#490](https://github.com/SignalK/freeboard-sk/issues/490).
+
+### Testing the alarms
+
+Real alarms need real weather, but you can verify the whole chain in
+minutes by temporarily lowering the thresholds in the plugin config —
+e.g. wind rise **0.1 m/s / 2 min** and pressure drop **0.1 hPa / 5 min**.
+Normal measurement jitter will then raise alarms within a few polls:
+check for `notifications.environment.observations.viva.*` paths in the Data
+Browser, an alert in KIP/Freeboard-SK, and the ⚠ note at the station on the
+chart. Alarms clear with hysteresis (at 80 % of the threshold), so expect
+them to come and go. Restore the thresholds afterwards.
 
 ## Visualization
 
