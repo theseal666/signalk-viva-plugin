@@ -3,4 +3,4 @@ a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a c
  
 ![alt text][logo]
 
-[logo]: https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png](https://github.com/theseal666/signalk-viva-plugin/blob/main/signalK-viva-plugin_logo.png "Logo Title Text 2"
+[logo]: https://github.com/theseal666/signalk-viva-plugin/blob/main/signalK-viva-plugin_logo.png "Logo Title Text 2"
