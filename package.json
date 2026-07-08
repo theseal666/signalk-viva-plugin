@@ -1,6 +1,6 @@
 {
   "name": "signalk-viva",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Signal K plugin that polls nearby Sjöfartsverket ViVa stations for wind, air pressure and temperature, and raises alarms on sudden wind changes or pressure drops",
   "main": "index.js",
   "keywords": [

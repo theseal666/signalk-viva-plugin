@@ -1,7 +1,7 @@
 # signalk-viva-plugin
-![alt text][logo]
+![signalk-viva logo][logo]
 
-[logo]: https://github.com/theseal666/signalk-viva-plugin/blob/main/signalK-viva-plugin_logo.png "Logo Title Text 2"
+[logo]: https://raw.githubusercontent.com/theseal666/signalk-viva-plugin/main/signalK-viva-plugin_logo.png "signalk-viva"
 
 
 a plugin that scrapes data from the Svenska sjöfartsverket viva-system from a configurable number of stations around my location to monitor for wind, barometric pressure and visualize and with end goal - put alarms in place for sudden changes in conditions.
@@ -40,7 +40,7 @@ Example: `environment.observations.viva.bonan.wind.averageSpeed`
 
 Live data in the Signal K Data Browser (here from Vinga and Svenska Högarna):
 
-![ViVa observations in the Signal K Data Browser](screenshot-data-browser.png)
+![ViVa observations in the Signal K Data Browser](https://raw.githubusercontent.com/theseal666/signalk-viva-plugin/main/screenshot-data-browser.png)
 
 Alarms are published as standard Signal K notifications, e.g.
 `notifications.environment.observations.viva.bonan.pressureDrop` with
@@ -68,7 +68,7 @@ observations**:
 Alarm windows need at least half the window of collected history before they
 can fire, so you won't get spurious alarms right after startup.
 
-![Plugin configuration in the Signal K admin UI](screenshot-plugin-config.png)
+![Plugin configuration in the Signal K admin UI](https://raw.githubusercontent.com/theseal666/signalk-viva-plugin/main/screenshot-plugin-config.png)
 
 ### Finding station IDs
 
