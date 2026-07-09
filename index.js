@@ -253,7 +253,11 @@ module.exports = function (app) {
     const due = Date.now() - state.lastDiscovery > DISCOVERY_INTERVAL_MS
     const moved =
       pos && state.lastDiscoveryPos && haversine(pos, state.lastDiscoveryPos) > REDISCOVER_MOVE_M
-    if (state.stations.size > 0 && !due && !moved) return
+    // If the last discovery ran before any position was known (GPS not up yet
+    // at startup), re-run as soon as a position appears instead of waiting out
+    // the full discovery interval with only the manual stations
+    const positionAppeared = pos && state.lastDiscovery > 0 && !state.lastDiscoveryPos
+    if (state.stations.size > 0 && !due && !moved && !positionAppeared) return
 
     const list = (await fetchJson(BASE_URL)).GetStationsResult.Stations
     const byId = new Map(list.map(s => [s.ID, s]))
