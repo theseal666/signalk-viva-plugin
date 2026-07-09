@@ -373,7 +373,7 @@ module.exports = function (app) {
       const kind = SAMPLE_KINDS.find(k => k.match.test(sample.Name))
       if (!kind) continue
 
-      const si = parseSampleValue(sample)
+      const si = parseSampleValue(sample, kind.units)
       if (kind.path) push(kind.path, si)
       if (kind.direction && typeof sample.Heading === 'number') {
         push(DIRECTION_SUFFIX, degToRad(sample.Heading))
@@ -418,10 +418,12 @@ module.exports = function (app) {
   // ViVa values are strings that may embed a compass direction ("NV 8.8")
   // or use a decimal comma — extract the first number and convert to SI.
   // A calm wind sample may have no number at all; treat that as 0.
-  function parseSampleValue (sample) {
+  // fallbackUnit is the unit we know from the SAMPLE_KINDS definition —
+  // used when the API omits or nulls the Unit field for that sample.
+  function parseSampleValue (sample, fallbackUnit) {
     const match = String(sample.Value).replace(',', '.').match(/-?\d+(\.\d+)?/)
     if (!match) return sample.Calm ? 0 : null
-    return toSI(parseFloat(match[0]), sample.Unit)
+    return toSI(parseFloat(match[0]), sample.Unit || fallbackUnit)
   }
 
   // Send Signal K meta (units + station name) once per station, so apps
