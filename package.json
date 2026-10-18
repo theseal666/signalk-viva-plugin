@@ -1,7 +1,7 @@
 {
   "name": "signalk-viva",
   "version": "0.3.0",
-  "description": "Signal K plugin that polls nearby Sjöfartsverket ViVa stations for wind, air pressure and temperature, and raises alarms on sudden wind changes or pressure drops",
+  "description": "Signal K plugin that polls nearby Sj\u00f6fartsverket ViVa stations for wind, air pressure and temperature, and raises alarms on sudden wind changes or pressure drops",
   "main": "index.js",
   "keywords": [
     "signalk-node-server-plugin",
@@ -26,5 +26,12 @@
   ],
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "mocha": "^10.0.0",
+    "chai": "^4.3.0"
+  },
+  "scripts": {
+    "test": "mocha test/*.js"
   }
 }
