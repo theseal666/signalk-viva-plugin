@@ -45,6 +45,21 @@ const PROBE_BATCH_SIZE = 4
 //   qualifies — sample types that make a station worth following from a
 //               sailboat; stations with none of these are skipped
 //   history   — which per-station history buffer feeds the alarm logic
+// A station reports current at several depths as separate samples — "Ström Yta",
+// "Ström 3m", "Ström 7m" and so on — each carrying speed in Value and set in
+// Heading. They therefore need one path per depth: push() de-duplicates on the
+// path suffix, so a single shared path would keep whichever depth arrived first
+// and silently drop the rest. Hence pathFor/dirFor rather than a fixed path.
+const CURRENT_DEPTH = /^str[öo]m\s*(yta|\d+\s*m)\b/i
+function currentDepth (name) {
+  const m = CURRENT_DEPTH.exec(String(name || ''))
+  if (!m) return null
+  const d = m[1].toLowerCase().replace(/\s+/g, '')
+  return d === 'yta' ? 'surface' : d
+}
+// The depths worth publishing meta for, in the order ViVa reports them
+const CURRENT_DEPTHS = ['surface', '3m', '7m', '11m', '15m']
+
 const SAMPLE_KINDS = [
   { match: /^medelvind/i, path: 'wind.averageSpeed', units: 'm/s', direction: true, qualifies: true, history: 'windSpeed' },
   { match: /^byvind/i, path: 'wind.gust', units: 'm/s', qualifies: true },
@@ -52,7 +67,15 @@ const SAMPLE_KINDS = [
   { match: /^lufttryck/i, path: 'pressure', units: 'Pa', qualifies: true, history: 'pressure' },
   { match: /^lufttemp/i, path: 'temperature', units: 'K' },
   { match: /^vattentemp/i, path: 'water.temperature', units: 'K' },
-  { match: /^vattenst/i, path: 'water.level', units: 'm' }
+  { match: /^vattenst/i, path: 'water.level', units: 'm' },
+  // Not marked `qualifies`: a station is still followed on its wind, so adding
+  // current does not change which stations get tracked.
+  {
+    match: CURRENT_DEPTH,
+    units: 'm/s',
+    pathFor: s => { const d = currentDepth(s.Name); return d && `water.current.${d}.drift` },
+    dirFor: s => { const d = currentDepth(s.Name); return d && `water.current.${d}.setTrue` }
+  }
 ]
 
 const DIRECTION_SUFFIX = 'wind.directionTrue'
@@ -374,10 +397,17 @@ module.exports = function (app) {
       if (!kind) continue
 
       const si = parseSampleValue(sample, kind.units)
-      if (kind.path) push(kind.path, si)
-      if (kind.direction && typeof sample.Heading === 'number') {
-        push(DIRECTION_SUFFIX, degToRad(sample.Heading))
-        recordHistory(st.history.windDir, now, sample.Heading)
+      const valuePath = kind.pathFor ? kind.pathFor(sample) : kind.path
+      if (valuePath) push(valuePath, si)
+
+      const dirPath = kind.dirFor
+        ? kind.dirFor(sample)
+        : (kind.direction ? DIRECTION_SUFFIX : null)
+      if (dirPath && typeof sample.Heading === 'number') {
+        push(dirPath, degToRad(sample.Heading))
+        // Only the wind direction feeds the shift alarms; a current set would
+        // otherwise be mistaken for a veer.
+        if (dirPath === DIRECTION_SUFFIX) recordHistory(st.history.windDir, now, sample.Heading)
       }
       if (kind.history === 'windSpeed' && si != null) recordHistory(st.history.windSpeed, now, si)
       if (kind.history === 'pressure' && si != null) recordHistory(st.history.pressure, now, si)
@@ -442,6 +472,16 @@ module.exports = function (app) {
       path: prefix + DIRECTION_SUFFIX,
       value: { units: 'rad', description: `${st.name} (ViVa station ${st.id})` }
     })
+    for (const d of CURRENT_DEPTHS) {
+      meta.push({
+        path: `${prefix}water.current.${d}.drift`,
+        value: { units: 'm/s', description: `Current drift at ${d} — ${st.name} (ViVa station ${st.id})` }
+      })
+      meta.push({
+        path: `${prefix}water.current.${d}.setTrue`,
+        value: { units: 'rad', description: `Current set at ${d} — ${st.name} (ViVa station ${st.id})` }
+      })
+    }
     meta.push({
       path: prefix + 'distance',
       value: { units: 'm', description: `Distance from vessel to ${st.name} (ViVa station ${st.id})` }
@@ -617,6 +657,10 @@ module.exports = function (app) {
         return value + 273.15
       case 'km':
         return value * 1000
+      case 'knop':
+      case 'kn':
+      case 'knots':
+        return value * 0.5144444
       default:
         return null
     }
